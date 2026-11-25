@@ -50,5 +50,12 @@ export function createApp(db, options = {}) {
     });
   }
 
+  app.use((err, _req, res, _next) => {
+    if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+      return res.status(400).json({ error: 'صيغة بيانات JSON المرسلة غير صالحة' });
+    }
+    return res.status(500).json({ error: 'حدث خطأ داخلي في الخادم' });
+  });
+
   return app;
 }

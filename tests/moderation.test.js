@@ -260,3 +260,106 @@ test('admin CMS CRUD works for hadiths, stories, sermons, categories, and role p
     await srv.close();
   }
 });
+
+test('admin CMS rejects empty paragraph arrays, non-string array items, non-string PATCH values, bad sort_order, and malformed JSON with 400 JSON', async () => {
+  const srv = await startTestServer();
+  try {
+    const admin = new ClientJar(srv.baseUrl);
+    await admin.req('/api/auth/demo-login', { method: 'POST', body: { role: 'admin' } });
+
+    // Empty paragraphs/body_paragraphs on POST
+    const emptyStory = await admin.req('/api/admin/stories', {
+      method: 'POST',
+      body: { title: 'قصة صالحة', category: 'lessons', summary: 'ملخص صالح للقصة', paragraphs: [] },
+    });
+    assert.equal(emptyStory.status, 400);
+
+    const emptySermon = await admin.req('/api/admin/sermons', {
+      method: 'POST',
+      body: { title: 'موعظة صالحة', category: 'السكينة', excerpt: 'مقتطف صالح', body_paragraphs: [] },
+    });
+    assert.equal(emptySermon.status, 400);
+
+    // Non-string array elements on POST & PATCH
+    const badMood = await admin.req('/api/admin/hadiths', {
+      method: 'POST',
+      body: {
+        title: 'حديث صالح',
+        text_diacritics: 'نص حديث صالح بالتشكيل الكامل',
+        narrator: 'أبو هريرة',
+        source: 'صحيح مسلم',
+        grade: 'صحيح',
+        category: 'الذكر',
+        explanation: 'شرح الحديث هنا',
+        benefits: ['فائدة'],
+        mood_tags: [123],
+      },
+    });
+    assert.equal(badMood.status, 400);
+
+    const hadiths = await admin.req('/api/admin/hadiths');
+    const hid = hadiths.data.items[0].id;
+    const badPatchBenefits = await admin.req(`/api/admin/hadiths/${hid}`, {
+      method: 'PATCH',
+      body: { benefits: [{ bad: 1 }] },
+    });
+    assert.equal(badPatchBenefits.status, 400);
+
+    const nullTitlePatch = await admin.req(`/api/admin/hadiths/${hid}`, {
+      method: 'PATCH',
+      body: { title: null },
+    });
+    assert.equal(nullTitlePatch.status, 400);
+
+    const stories = await admin.req('/api/admin/stories');
+    const sid = stories.data.items[0].id;
+    assert.equal(
+      (await admin.req(`/api/admin/stories/${sid}`, { method: 'PATCH', body: { paragraphs: [] } })).status,
+      400
+    );
+    assert.equal(
+      (await admin.req(`/api/admin/stories/${sid}`, { method: 'PATCH', body: { lessons: [{}] } })).status,
+      400
+    );
+    assert.equal(
+      (await admin.req(`/api/admin/stories/${sid}`, { method: 'PATCH', body: { title: null } })).status,
+      400
+    );
+
+    const sermons = await admin.req('/api/admin/sermons');
+    const mid = sermons.data.items[0].id;
+    assert.equal(
+      (await admin.req(`/api/admin/sermons/${mid}`, { method: 'PATCH', body: { body_paragraphs: [] } })).status,
+      400
+    );
+    assert.equal(
+      (await admin.req(`/api/admin/sermons/${mid}`, { method: 'PATCH', body: { title: {} } })).status,
+      400
+    );
+
+    // Invalid sort_order on category PATCH -> 400 JSON (not 500 HTML)
+    const cats = await admin.req('/api/forum/categories');
+    const cid = cats.data.items[0].id;
+    const badSort = await admin.req(`/api/admin/categories/${cid}`, {
+      method: 'PATCH',
+      body: { sort_order: 'abc' },
+    });
+    assert.equal(badSort.status, 400);
+    assert.ok(typeof badSort.data?.error === 'string');
+
+    // Malformed raw JSON -> 400 JSON (not HTML stack trace)
+    const rawRes = await fetch(`${srv.baseUrl}/api/admin/hadiths`, {
+      method: 'POST',
+      headers: {
+        Cookie: admin.cookie,
+        'Content-Type': 'application/json',
+      },
+      body: '{invalid-json',
+    });
+    assert.equal(rawRes.status, 400);
+    const rawJson = await rawRes.json();
+    assert.ok(typeof rawJson.error === 'string');
+  } finally {
+    await srv.close();
+  }
+});

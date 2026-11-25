@@ -3,8 +3,22 @@ import { normalizeArabic } from '../arabic.js';
 import { invalidateUserSessions, recalculateUserPoints, requireRole } from '../auth.js';
 import { formatHadith, formatSermon, formatStory } from './library.js';
 
-function isStringArray(val) {
-  return Array.isArray(val) && val.every((x) => typeof x === 'string' && x.trim().length > 0);
+function isStringArray(val, { nonEmpty = false } = {}) {
+  return (
+    Array.isArray(val) &&
+    (!nonEmpty || val.length > 0) &&
+    val.every((x) => typeof x === 'string' && x.trim().length > 0)
+  );
+}
+
+function cleanStringArray(arr) {
+  return arr.map((x) => x.trim());
+}
+
+function readStringField(body, key, fallback) {
+  if (body[key] === undefined) return { ok: true, value: fallback };
+  if (typeof body[key] !== 'string') return { ok: false, value: '' };
+  return { ok: true, value: body[key].trim() };
 }
 
 function makeSlug(input) {
@@ -258,7 +272,7 @@ export function createModerationRouter(db) {
     if (!title || !textDiacritics || !narrator || !source || !grade || !category || !explanation) {
       return res.status(400).json({ error: 'جميع الحقول الأساسية للحديث مطلوبة (العنوان، النص، الراوي، المصدر، الدرجة، التصنيف، الشرح)' });
     }
-    if (!Array.isArray(benefits) || !isStringArray(benefits) || !Array.isArray(moodTags)) {
+    if (!isStringArray(benefits) || !isStringArray(moodTags)) {
       return res.status(400).json({ error: 'الفوائد والوسوم الشعورية يجب أن تكون مصفوفات نصوص صالحة' });
     }
 
@@ -282,9 +296,9 @@ export function createModerationRouter(db) {
         source,
         grade,
         category,
-        JSON.stringify(moodTags),
+        JSON.stringify(cleanStringArray(moodTags)),
         explanation,
-        JSON.stringify(benefits),
+        JSON.stringify(cleanStringArray(benefits)),
         isFeatured,
         isPublished,
         req.user.id
@@ -300,20 +314,33 @@ export function createModerationRouter(db) {
     if (!existing) return res.status(404).json({ error: 'الحديث غير موجود' });
 
     const b = req.body || {};
-    const title = b.title !== undefined ? String(b.title).trim() : existing.title;
-    const textDiacritics = b.text_diacritics !== undefined ? String(b.text_diacritics).trim() : existing.text_diacritics;
-    const narrator = b.narrator !== undefined ? String(b.narrator).trim() : existing.narrator;
-    const source = b.source !== undefined ? String(b.source).trim() : existing.source;
-    const grade = b.grade !== undefined ? String(b.grade).trim() : existing.grade;
-    const category = b.category !== undefined ? String(b.category).trim() : existing.category;
-    const explanation = b.explanation !== undefined ? String(b.explanation).trim() : existing.explanation;
+    const titleRes = readStringField(b, 'title', existing.title);
+    const textRes = readStringField(b, 'text_diacritics', existing.text_diacritics);
+    const narratorRes = readStringField(b, 'narrator', existing.narrator);
+    const sourceRes = readStringField(b, 'source', existing.source);
+    const gradeRes = readStringField(b, 'grade', existing.grade);
+    const categoryRes = readStringField(b, 'category', existing.category);
+    const explanationRes = readStringField(b, 'explanation', existing.explanation);
+    if (
+      !titleRes.ok || !textRes.ok || !narratorRes.ok || !sourceRes.ok ||
+      !gradeRes.ok || !categoryRes.ok || !explanationRes.ok
+    ) {
+      return res.status(400).json({ error: 'يجب أن تكون الحقول النصية للحديث نصوصاً صالحة' });
+    }
+    const title = titleRes.value;
+    const textDiacritics = textRes.value;
+    const narrator = narratorRes.value;
+    const source = sourceRes.value;
+    const grade = gradeRes.value;
+    const category = categoryRes.value;
+    const explanation = explanationRes.value;
     const benefits = b.benefits !== undefined ? b.benefits : JSON.parse(existing.benefits_json);
     const moodTags = b.mood_tags !== undefined ? b.mood_tags : JSON.parse(existing.mood_tags);
 
     if (!title || !textDiacritics || !narrator || !source || !grade || !category || !explanation) {
       return res.status(400).json({ error: 'لا يمكن ترك حقول الحديث الأساسية فارغة' });
     }
-    if (!Array.isArray(benefits) || !Array.isArray(moodTags)) {
+    if (!isStringArray(benefits) || !isStringArray(moodTags)) {
       return res.status(400).json({ error: 'صيغة الفوائد أو الوسوم غير صالحة' });
     }
 
@@ -336,9 +363,9 @@ export function createModerationRouter(db) {
       source,
       grade,
       category,
-      JSON.stringify(moodTags),
+      JSON.stringify(cleanStringArray(moodTags)),
       explanation,
-      JSON.stringify(benefits),
+      JSON.stringify(cleanStringArray(benefits)),
       isFeatured,
       isPublished,
       id
@@ -373,8 +400,8 @@ export function createModerationRouter(db) {
     if (!title || !['prophets', 'companions', 'seerah', 'lessons'].includes(category) || !summary) {
       return res.status(400).json({ error: 'يرجى إدخال العنوان والتصنيف والملخص للقصة بشكل صحيح' });
     }
-    if (!isStringArray(paragraphs) || !Array.isArray(lessons) || !Array.isArray(moodTags)) {
-      return res.status(400).json({ error: 'فقرات القصة يجب أن تكون مصفوفة نصوص غير فارغة' });
+    if (!isStringArray(paragraphs, { nonEmpty: true }) || !isStringArray(lessons) || !isStringArray(moodTags)) {
+      return res.status(400).json({ error: 'فقرات القصة يجب أن تكون مصفوفة نصوص غير فارغة مع دروس ووسوم صالحة' });
     }
 
     let slug = makeSlug(b.slug || title);
@@ -398,10 +425,10 @@ export function createModerationRouter(db) {
         title,
         category,
         summary,
-        JSON.stringify(paragraphs),
-        JSON.stringify(lessons),
+        JSON.stringify(cleanStringArray(paragraphs)),
+        JSON.stringify(cleanStringArray(lessons)),
         readingMinutes,
-        JSON.stringify(moodTags),
+        JSON.stringify(cleanStringArray(moodTags)),
         accentColor,
         isPublished,
         req.user.id
@@ -417,22 +444,28 @@ export function createModerationRouter(db) {
     if (!existing) return res.status(404).json({ error: 'القصة غير موجودة' });
 
     const b = req.body || {};
-    const title = b.title !== undefined ? String(b.title).trim() : existing.title;
+    const titleRes = readStringField(b, 'title', existing.title);
+    const summaryRes = readStringField(b, 'summary', existing.summary);
+    const accentRes = readStringField(b, 'accent_color', existing.accent_color);
+    if (!titleRes.ok || !summaryRes.ok || !accentRes.ok) {
+      return res.status(400).json({ error: 'يجب أن تكون حقول القصة النصية نصوصاً صالحة' });
+    }
+    const title = titleRes.value;
     const category = b.category !== undefined ? b.category : existing.category;
-    const summary = b.summary !== undefined ? String(b.summary).trim() : existing.summary;
+    const summary = summaryRes.value;
     const paragraphs = b.paragraphs !== undefined ? b.paragraphs : JSON.parse(existing.paragraphs_json);
     const lessons = b.lessons !== undefined ? b.lessons : JSON.parse(existing.lessons_json);
     const moodTags = b.mood_tags !== undefined ? b.mood_tags : JSON.parse(existing.mood_tags);
 
-    if (!title || !['prophets', 'companions', 'seerah', 'lessons'].includes(category) || !summary || !isStringArray(paragraphs)) {
+    if (!title || !['prophets', 'companions', 'seerah', 'lessons'].includes(category) || !summary || !isStringArray(paragraphs, { nonEmpty: true })) {
       return res.status(400).json({ error: 'بيانات القصة غير صالحة' });
     }
-    if (!Array.isArray(lessons) || !Array.isArray(moodTags)) {
+    if (!isStringArray(lessons) || !isStringArray(moodTags)) {
       return res.status(400).json({ error: 'صيغة الدروس أو الوسوم غير صالحة' });
     }
 
     const readingMinutes = b.reading_minutes !== undefined ? Math.max(1, Number(b.reading_minutes) || 4) : existing.reading_minutes;
-    const accentColor = b.accent_color !== undefined ? String(b.accent_color) : existing.accent_color;
+    const accentColor = accentRes.value || '#10b981';
     const isPublished = b.is_published !== undefined ? (b.is_published ? 1 : 0) : existing.is_published;
 
     db.prepare(
@@ -444,10 +477,10 @@ export function createModerationRouter(db) {
       title,
       category,
       summary,
-      JSON.stringify(paragraphs),
-      JSON.stringify(lessons),
+      JSON.stringify(cleanStringArray(paragraphs)),
+      JSON.stringify(cleanStringArray(lessons)),
       readingMinutes,
-      JSON.stringify(moodTags),
+      JSON.stringify(cleanStringArray(moodTags)),
       accentColor,
       isPublished,
       id
@@ -479,7 +512,7 @@ export function createModerationRouter(db) {
     const reflectionQuestion = typeof b.reflection_question === 'string' ? b.reflection_question.trim() : '';
     const moodTags = b.mood_tags !== undefined ? b.mood_tags : [];
 
-    if (!title || !category || !excerpt || !isStringArray(bodyParagraphs) || !Array.isArray(moodTags)) {
+    if (!title || !category || !excerpt || !isStringArray(bodyParagraphs, { nonEmpty: true }) || !isStringArray(moodTags)) {
       return res.status(400).json({ error: 'يرجى إدخال عنوان الموعظة وتصنيفها ومقتطفها وفقراتها بشكل صحيح' });
     }
 
@@ -497,9 +530,9 @@ export function createModerationRouter(db) {
         title,
         category,
         excerpt,
-        JSON.stringify(bodyParagraphs),
+        JSON.stringify(cleanStringArray(bodyParagraphs)),
         reflectionQuestion,
-        JSON.stringify(moodTags),
+        JSON.stringify(cleanStringArray(moodTags)),
         readingMinutes,
         isPublished,
         req.user.id
@@ -515,14 +548,21 @@ export function createModerationRouter(db) {
     if (!existing) return res.status(404).json({ error: 'الموعظة غير موجودة' });
 
     const b = req.body || {};
-    const title = b.title !== undefined ? String(b.title).trim() : existing.title;
-    const category = b.category !== undefined ? String(b.category).trim() : existing.category;
-    const excerpt = b.excerpt !== undefined ? String(b.excerpt).trim() : existing.excerpt;
+    const titleRes = readStringField(b, 'title', existing.title);
+    const categoryRes = readStringField(b, 'category', existing.category);
+    const excerptRes = readStringField(b, 'excerpt', existing.excerpt);
+    const reflectionRes = readStringField(b, 'reflection_question', existing.reflection_question);
+    if (!titleRes.ok || !categoryRes.ok || !excerptRes.ok || !reflectionRes.ok) {
+      return res.status(400).json({ error: 'يجب أن تكون حقول الموعظة النصية نصوصاً صالحة' });
+    }
+    const title = titleRes.value;
+    const category = categoryRes.value;
+    const excerpt = excerptRes.value;
     const bodyParagraphs = b.body_paragraphs !== undefined ? b.body_paragraphs : JSON.parse(existing.body_paragraphs_json);
-    const reflectionQuestion = b.reflection_question !== undefined ? String(b.reflection_question).trim() : existing.reflection_question;
+    const reflectionQuestion = reflectionRes.value;
     const moodTags = b.mood_tags !== undefined ? b.mood_tags : JSON.parse(existing.mood_tags);
 
-    if (!title || !category || !excerpt || !isStringArray(bodyParagraphs) || !Array.isArray(moodTags)) {
+    if (!title || !category || !excerpt || !isStringArray(bodyParagraphs, { nonEmpty: true }) || !isStringArray(moodTags)) {
       return res.status(400).json({ error: 'بيانات الموعظة غير صالحة' });
     }
 
@@ -538,9 +578,9 @@ export function createModerationRouter(db) {
       title,
       category,
       excerpt,
-      JSON.stringify(bodyParagraphs),
+      JSON.stringify(cleanStringArray(bodyParagraphs)),
       reflectionQuestion,
-      JSON.stringify(moodTags),
+      JSON.stringify(cleanStringArray(moodTags)),
       readingMinutes,
       isPublished,
       id
@@ -563,8 +603,10 @@ export function createModerationRouter(db) {
     const cleanSlug = typeof slug === 'string' ? slug.trim().toLowerCase() : '';
     const cleanName = typeof name === 'string' ? name.trim() : '';
     const cleanDesc = typeof description === 'string' ? description.trim() : '';
+    const cleanIcon = typeof icon === 'string' && icon.trim() ? icon.trim() : 'MessageSquare';
+    const orderNum = Number(sort_order);
 
-    if (!/^[a-z0-9-]{2,40}$/.test(cleanSlug) || cleanName.length < 2 || cleanDesc.length < 4) {
+    if (!/^[a-z0-9-]{2,40}$/.test(cleanSlug) || cleanName.length < 2 || cleanDesc.length < 4 || !Number.isInteger(orderNum)) {
       return res.status(400).json({ error: 'بيانات قسم المنتدى غير صالحة' });
     }
     if (db.prepare('SELECT id FROM forum_categories WHERE slug = ?').get(cleanSlug)) {
@@ -573,7 +615,7 @@ export function createModerationRouter(db) {
 
     const { lastInsertRowid } = db
       .prepare('INSERT INTO forum_categories (slug, name, description, icon, sort_order) VALUES (?, ?, ?, ?, ?)')
-      .run(cleanSlug, cleanName, cleanDesc, String(icon), Number(sort_order) || 10);
+      .run(cleanSlug, cleanName, cleanDesc, cleanIcon, orderNum);
 
     const item = db.prepare('SELECT * FROM forum_categories WHERE id = ?').get(Number(lastInsertRowid));
     res.status(201).json({ item });
@@ -584,13 +626,20 @@ export function createModerationRouter(db) {
     const existing = db.prepare('SELECT * FROM forum_categories WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'القسم غير موجود' });
 
-    const name = req.body?.name !== undefined ? String(req.body.name).trim() : existing.name;
-    const description = req.body?.description !== undefined ? String(req.body.description).trim() : existing.description;
-    const icon = req.body?.icon !== undefined ? String(req.body.icon).trim() : existing.icon;
-    const sortOrder = req.body?.sort_order !== undefined ? Number(req.body.sort_order) : existing.sort_order;
+    const b = req.body || {};
+    const nameRes = readStringField(b, 'name', existing.name);
+    const descRes = readStringField(b, 'description', existing.description);
+    const iconRes = readStringField(b, 'icon', existing.icon);
+    if (!nameRes.ok || !descRes.ok || !iconRes.ok) {
+      return res.status(400).json({ error: 'يجب أن تكون الحقول النصية للقسم نصوصاً صالحة' });
+    }
+    const name = nameRes.value;
+    const description = descRes.value;
+    const icon = iconRes.value || existing.icon;
+    const sortOrder = b.sort_order !== undefined ? Number(b.sort_order) : existing.sort_order;
 
-    if (name.length < 2 || description.length < 4) {
-      return res.status(400).json({ error: 'يرجى إدخال اسم ووصف صحيحين للقسم' });
+    if (name.length < 2 || description.length < 4 || !Number.isInteger(sortOrder)) {
+      return res.status(400).json({ error: 'يرجى إدخال اسم ووصف وترتيب صحيحين للقسم' });
     }
     db.prepare('UPDATE forum_categories SET name = ?, description = ?, icon = ?, sort_order = ? WHERE id = ?').run(
       name,
