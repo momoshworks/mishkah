@@ -7,6 +7,7 @@ import { createRateLimiter } from './rateLimit.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createLibraryRouter } from './routes/library.js';
 import { createForumRouter } from './routes/forum.js';
+import { createModerationRouter } from './routes/moderation.js';
 
 /**
  * Create the Mishkah Express application.
@@ -36,6 +37,7 @@ export function createApp(db, options = {}) {
   app.use('/api/auth', createAuthRouter(db, { demoMode, authLimiter }));
   app.use('/api', createLibraryRouter(db, { writeLimiter }));
   app.use('/api', createForumRouter(db, { writeLimiter }));
+  app.use('/api', createModerationRouter(db));
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'نقطة النهاية المطلوبة غير موجودة' });
