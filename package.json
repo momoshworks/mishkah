@@ -1,0 +1,16 @@
+{
+  "name": "mishkah",
+  "version": "1.0.0",
+  "description": "منصة مِشكاة الدينية المتكاملة - مكتبة الأحاديث والقصص والمواعظ والمنتدى الديني",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "build": "npm --prefix client run build",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^5.1.0"
+  }
+}
